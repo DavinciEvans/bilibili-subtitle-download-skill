@@ -2,6 +2,7 @@
 从 B 站拉音轨到本地 mp3 192kbps。
 复用现有 cookie 凭证。
 """
+import asyncio
 import os
 import subprocess
 from pathlib import Path
@@ -42,14 +43,14 @@ def _choose_audio_track(audio_tracks: list[dict]) -> dict:
             return t
     return audio_tracks[0]
 
-def fetch_audio_192k(
+async def fetch_audio_192k(
     bv_id: str,
     page_index: int,
     output_path: str | Path,
     *,
     cookie_path: str = "~/.openclaw/workspace/bilibili_cookie.txt",
 ) -> Path:
-    """拉指定分 P 的 192kbps 音轨到 output_path (mp3)。返回 output_path。"""
+    """拉指定分 P 的 192kbps 音轨到 output_path (mp3)。返回 output_path。async 版本。"""
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -58,7 +59,7 @@ def fetch_audio_192k(
     v = video.Video(bvid=bv_id, credential=cred)
 
     try:
-        url_info = v.get_download_url(page_index=page_index)
+        url_info = await v.get_download_url(page_index=page_index)
     except Exception as e:
         raise BilibiliAudioError(f"get_download_url failed: {e}") from e
 
@@ -82,3 +83,13 @@ def fetch_audio_192k(
         raise BilibiliAudioError(f"ffmpeg failed: {r.stderr.decode(errors='ignore')[:500]}")
 
     return output
+
+def fetch_audio_192k_sync(
+    bv_id: str,
+    page_index: int,
+    output_path: str | Path,
+    *,
+    cookie_path: str = "~/.openclaw/workspace/bilibili_cookie.txt",
+) -> Path:
+    """sync wrapper around fetch_audio_192k."""
+    return asyncio.run(fetch_audio_192k(bv_id, page_index, output_path, cookie_path=cookie_path))

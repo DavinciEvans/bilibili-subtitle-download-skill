@@ -6,10 +6,22 @@ import asyncio
 import requests
 from bilibili_api import login_v2, Credential
 
+try:
+    from scripts.asr_fallback import run_asr
+except ImportError:
+    # 当 download_and_chunk.py 被作为 __main__ 直接运行（非 -m scripts.download_and_chunk）时,
+    # scripts 包的相对 import 会失败。fallback: 把 scripts/ 父目录加到 sys.path,
+    # 这样 scripts 就成了 namespace package, scripts.asr_fallback 等子模块都可正常 import
+    import sys as _sys
+    from pathlib import Path as _Path
+    _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+    from scripts.asr_fallback import run_asr
+
 # Configuration
 COOKIE_FILE = os.path.expanduser('~/.openclaw/workspace/bilibili_cookie.txt')
-CHARS_PER_CHUNK = 100000 
+CHARS_PER_CHUNK = 100000
 QR_IMAGE_PATH = os.path.expanduser('~/.openclaw/workspace/bilibili_login_qr.png')
+OUTPUT_DIR_FALLBACK = os.path.join('bili_temp', '{bv_id}')  # 占位符, main() 替换
 
 def clean_filename(title):
     return re.sub(r'[\\/:*?"<>|]', '_', title)
@@ -138,23 +150,25 @@ def fetch_ai_subtitle(bv_id, cid, cookie):
     """
     return None  # Not needed anymore
 
-async def main():
-    if len(sys.argv) < 2:
+async def main(argv=None):
+    if argv is None:
+        argv = sys.argv
+    if len(argv) < 2:
         print("Usage: python3 download_and_chunk.py <BV_ID> [P_NUM]")
         sys.exit(1)
-    
-    bv_id = sys.argv[1]
-    p_num = int(sys.argv[2]) if len(sys.argv) > 2 else 0
-    
+
+    bv_id = argv[1]
+    p_num = int(argv[2]) if len(argv) > 2 else 0
+
     print(f"[*] Processing {bv_id} (P{p_num})...🐾", flush=True)
-    
+
     try:
         cookie = get_saved_cookie()
         info = None
-        
+
         if cookie:
             info, err = get_video_info(bv_id, cookie)
-        
+
         # If no cookie or cookie expired/invalid
         if not info:
             cookie = await login_with_qr()
@@ -167,22 +181,43 @@ async def main():
         if p_num >= len(pages):
             raise Exception(f"Invalid P_NUM: video only has {len(pages)} parts.")
         cid = pages[p_num]['cid']
-        
+
         # Try fetching subtitle (supports both user and AI subtitles)
         full_text, subtitle_type = fetch_subtitle_content(bv_id, cid, cookie)
 
         if not full_text:
-            print("ERROR: 没找到字幕喵...😿 请确认视频是否有字幕（用户字幕或AI字幕）。")
-            sys.exit(1)
+            # 优先检查 cookie (ASR 需要)
+            if not cookie:
+                print("ERROR: 没找到字幕喵, 且无 cookie 文件, 无法走 ASR fallback...😿")
+                print(f"       请先登录以生成 cookie: {COOKIE_FILE}")
+                sys.exit(1)
+
+            print("[*] 没找到用户/AI字幕, 尝试 ASR fallback 🐾", flush=True)
+            output_dir = os.path.join(os.getcwd(), OUTPUT_DIR_FALLBACK.format(bv_id=bv_id))
+            try:
+                asr_result = run_asr(bv_id, p_num, output_dir, cookie_path=COOKIE_FILE)
+            except Exception as e:
+                print(f"ERROR: ASR fallback 失败: {e}")
+                sys.exit(1)
+
+            print(f"[*] ASR 完成, 分 {asr_result['segments_count']} 段, 写 {len(asr_result['chunks'])} 个 chunk")
+            print("RESULT_JSON:" + json.dumps({
+                "bv_id": bv_id,
+                "title": info.get('title', bv_id),
+                "total_chars": asr_result["total_chars"],
+                "chunks": asr_result["chunks"],
+                "method": "asr_fallback",
+            }))
+            return
 
         if subtitle_type == 'ai':
             print("[*] 检测到AI字幕并获取成功！🐾", flush=True)
 
         title = info.get('title', bv_id)
         total_chars = len(full_text)
-        
+
         # Create output dir in workspace using BV_ID
-        output_dir = os.path.join(os.getcwd(), 'bili_temp', bv_id)
+        output_dir = os.path.join(os.getcwd(), OUTPUT_DIR_FALLBACK.format(bv_id=bv_id))
         os.makedirs(output_dir, exist_ok=True)
         
         chunks = []

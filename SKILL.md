@@ -20,6 +20,7 @@ pip install bilibili-api-python
 |----------|------|----------|
 | 用户上传字幕 | `lan='zh'` | ✅ 完全支持 |
 | AI 自动字幕 | `lan='ai-zh'` | ✅ 完全支持 |
+| 无字幕 → ASR 语音识别 | — | ✅ 自动 fallback (MiMo-V2.5-ASR) |
 
 ## 工作流程
 
@@ -45,6 +46,35 @@ pip install bilibili-api-python
     * **登录**: 脚本将生成 `bilibili_login_qr.png` 二维码
     * **SS_ID 模式**: 打印课程信息和剧集列表，需用 EP_ID 获取字幕
     * **EP_ID 模式**: 下载字幕并切分保存到 `bili_temp/ep456/` 目录
+
+## 无字幕视频的 ASR Fallback
+
+当视频没有用户字幕（`zh`）也没有 AI 字幕（`ai-zh`）时，`download_and_chunk.py` 会自动调用 MiMo-V2.5-ASR 进行语音识别。
+
+### 流程
+1. 下载 192kbps 音轨到临时目录
+2. VAD 分段（webrtcvad，失败降级硬切）
+3. 逐段调 MiMo ASR（base64 后必须 ≤ 10MB，所以 1-3 min/段）
+4. 段间去重（最长公共子串）
+5. 输出**纯识别文本** chunk 文件（无时间戳，段间换行）
+
+### 前置条件
+- 已登录（cookie 文件 `~/.openclaw/workspace/bilibili_cookie.txt` 存在）
+- 环境变量 `MIMO_API_KEY` 已设置
+
+### 配置
+- API key 通过环境变量 `MIMO_API_KEY` 提供
+- cookie 文件：复用 `~/.openclaw/workspace/bilibili_cookie.txt`
+- 输出文件名前缀 `<BV_ID>_chunk_N.txt`，内容为各段去重后的纯识别文本，段间用换行分隔（**无时间戳**）
+
+### RESULT_JSON method 字段
+- `"subtitle"` — 来自 B 站字幕 API（用户或 AI 字幕）
+- `"asr_fallback"` — 来自 ASR 语音识别
+
+### 注意事项
+- MiMo ASR 在静音/纯音输入上会返回幻觉中文文本（无语音时的占位行为）。生产场景（真实语音）不会触发。
+- 跨段去重只去字符级重叠，不处理同义复述。
+- ASR 调用当前串行；如遇 429 限流可改并发。
 
 ## 子智能体指令
 

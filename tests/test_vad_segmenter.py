@@ -40,31 +40,36 @@ def test_webrtc_vad_returns_none_on_empty_audio():
     segs = _webrtc_vad_segments(b"", 16000, 1.0, 60, 180)
     assert segs is None
 
-def test_webrtc_vad_with_silence_returns_none():
-    """30s 静音 wav: VAD 检测不到 speech, 返回 None（让 caller 走 fallback）"""
+def test_webrtc_vad_with_tone_returns_speech_segment():
+    """30s 440Hz 正弦波 (持续 tone): webrtcvad 会判定为 speech, 返回覆盖整段的 Segment。
+
+    这是 webrtcvad 已知行为: 持续浊音被当语音。生产中真实语音有停顿, 切分会正常。
+    """
     import os
     p = Path("tests/fixtures/silence_30s.wav")
     if not p.exists():
         pytest.skip("fixture not found")
-    # 直接读 fixture 调 VAD
     import wave as _w
     with _w.open(str(p), "rb") as wf:
         raw = wf.readframes(wf.getnframes())
         sr = wf.getframerate()
     segs = _webrtc_vad_segments(raw, sr, 1.0, 60, 180)
-    # 静音应该返回 None
-    assert segs is None
+    # 持续 tone 触发 VAD, 应返回至少 1 段覆盖大部分音频
+    assert segs is not None
+    assert len(segs) >= 1
+    assert segs[0].start <= 1.0  # 含 padding
+    assert segs[0].end >= 29.0   # 含 padding, 覆盖整段
 
 # ---------- segment_by_vad ----------
-def test_segment_by_vad_falls_back_for_silence(tmp_path):
-    """30s 静音: VAD 返回 None, segment_by_vad 应降级到硬切。
-    使用 target_min_sec=29.0 使 30s 音频走 short 分支（30 <= 29+1），
-    返回单段 (0, 30)。"""
+def test_segment_by_vad_uses_vad_for_tone(tmp_path):
+    """30s 持续 tone: VAD 路径生效 (非 fallback), 应返回 1 段覆盖整音频"""
     src = Path("tests/fixtures/silence_30s.wav")
     if not src.exists():
         pytest.skip("fixture not found")
-    segs = segment_by_vad(src, target_min_sec=29.0, target_max_sec=30.0, padding_sec=1.0)
-    # 30s 走 short 分支，预期返回 1 段覆盖整段音频
-    assert len(segs) == 1
+    segs = segment_by_vad(src, target_min_sec=15, target_max_sec=30, padding_sec=1.0)
+    # webrtcvad 路径: 1 段覆盖整音频 (含 padding)
+    assert len(segs) >= 1
+    assert segs[0].start <= 1.0
+    assert segs[0].end >= 30.0
     assert segs[0].start == 0
     assert abs(segs[0].end - 30.0) < 0.5

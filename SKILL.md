@@ -60,10 +60,12 @@ pip install bilibili-api-python
 
 ### 前置条件
 - 已登录（cookie 文件 `~/.openclaw/workspace/bilibili_cookie.txt` 存在）
-- 环境变量 `MIMO_API_KEY` 已设置
 
 ### 配置
-- API key 通过环境变量 `MIMO_API_KEY` 提供
+- **API key 解析优先级**（从高到低）：
+  1. `transcribe_wav(api_key=...)` 函数参数
+  2. 环境变量 `MIMO_API_KEY`
+  3. key 文件 `~/.openclaw/workspace/mimo_api_key`（首行非空内容，自动 strip）
 - cookie 文件：复用 `~/.openclaw/workspace/bilibili_cookie.txt`
 - 输出文件名前缀 `<BV_ID>_chunk_N.txt`，内容为各段去重后的纯识别文本，段间用换行分隔（**无时间戳**）
 

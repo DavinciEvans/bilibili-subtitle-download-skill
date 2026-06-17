@@ -24,9 +24,10 @@ def test_assert_within_size_limit_accepts_small(tmp_path):
     _assert_within_size_limit(small, max_mb=10)
 
 
-def test_client_raises_without_key(monkeypatch):
+def test_client_raises_without_key(monkeypatch, tmp_path, monkeypatch_key_file):
     monkeypatch.delenv("MIMO_API_KEY", raising=False)
-    with pytest.raises(MiMoASRError, match="MIMO_API_KEY not set"):
+    # monkeypatch_key_file fixture (in conftest) points DEFAULT_KEY_FILE at an empty tmp file
+    with pytest.raises(MiMoASRError, match="MIMO API key not found"):
         _client(api_key=None)
 
 

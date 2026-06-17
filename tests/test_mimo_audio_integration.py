@@ -1,18 +1,18 @@
 """
 Integration test for mimo_audio.transcribe_wav.
-真实调 MiMo API。需要 MIMO_API_KEY 环境变量。
-如未设置则 skip。
+真实调 MiMo API。Key 解析优先级: 参数 > env var > key file (见 mimo_audio._resolve_api_key).
+如果三个来源都没有则 skip.
 """
 import os
 import pytest
 from pathlib import Path
-from scripts.mimo_audio import transcribe_wav, MiMoASRError
+from scripts.mimo_audio import transcribe_wav, MiMoASRError, _resolve_api_key
 
 FIXTURE = Path(__file__).parent / "fixtures" / "silence_30s.wav"
 
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("MIMO_API_KEY"),
-    reason="MIMO_API_KEY not set; integration test requires real API",
+    not _resolve_api_key(None),
+    reason="MIMO API key not provided via arg / env var / key file; integration test requires real API",
 )
 
 

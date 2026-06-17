@@ -39,7 +39,7 @@ async def login_with_qr():
     # Save QR code image for user to scan
     pic = qr.get_qrcode_picture()
     pic.to_file(QR_IMAGE_PATH)
-    
+
     print(f"QR_CODE_READY:{QR_IMAGE_PATH}", flush=True)
     print("老大，请扫描这个二维码登录喵！🐾", flush=True)
     

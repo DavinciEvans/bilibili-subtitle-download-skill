@@ -4,14 +4,38 @@ fetch audio → VAD/硬切 → 逐段调 MiMo ASR → 去重 → 写 chunk 文�
 """
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from scripts.mimo_audio import transcribe_wav, MiMoASRError
-from scripts.bilibili_audio import fetch_audio_192k_sync
+# 注意: 不要直接 import fetch_audio_192k_sync; 它内部 asyncio.run() 在
+# download_and_chunk 的顶层 event loop 里会报 "cannot be called from a running
+# event loop". 我们用子进程隔离.
 from scripts.vad_segmenter import segment_by_vad
 from scripts.text_dedup import merge_with_overlap_dedup
 
 CHARS_PER_CHUNK = 100_000
+
+def _fetch_audio_in_subprocess(bv_id: str, p_num: int, out_path: Path, cookie_path: str) -> None:
+    """在干净子进程里跑 fetch_audio_192k, 避免嵌套 event loop."""
+    # 把项目根加到 sys.path, 让子进程能 import scripts.bilibili_audio
+    project_root = str(Path(__file__).resolve().parent.parent)
+    runner = (
+        "import sys, asyncio\n"
+        f"sys.path.insert(0, {project_root!r})\n"
+        "from scripts.bilibili_audio import fetch_audio_192k\n"
+        f"asyncio.run(fetch_audio_192k({bv_id!r}, {p_num}, {str(out_path)!r}, "
+        f"cookie_path={cookie_path!r}))\n"
+    )
+    r = subprocess.run(
+        [sys.executable, "-c", runner],
+        capture_output=True, text=True, timeout=600,
+    )
+    if r.returncode != 0 or not out_path.exists() or out_path.stat().st_size < 100:
+        raise RuntimeError(
+            f"audio fetch subprocess failed (rc={r.returncode}).\n"
+            f"stdout: {r.stdout[-500:]}\nstderr: {r.stderr[-500:]}"
+        )
 
 def _slice_audio(audio_path: Path, start: float, end: float, out_path: Path) -> None:
     """用 ffmpeg 切音频段。"""
@@ -55,12 +79,26 @@ def run_asr(
         tmp_path = Path(tmp)
         audio_path = tmp_path / f"{bv_id}_p{p_num}.mp3"
 
-        # 1) 拉音频
-        fetch_audio_192k_sync(bv_id, p_num, audio_path, cookie_path=cookie_path)
+        # 1) 拉音频 (在子进程跑, 避开主 event loop)
+        _fetch_audio_in_subprocess(bv_id, p_num, audio_path, cookie_path)
+
+        # 1.5) 转 wav 16k/mono 供 VAD 用 (mp3 B 站 16kHz/160kbps 巧合
+        #      避开 vad_segmenter 内部 ffmpeg 路径, 但 mp3 不是 RIFF, wave.open
+        #      仍会失败 → 在外层显式转, 错误信息更清楚)
+        wav_path = tmp_path / f"{bv_id}_p{p_num}.wav"
+        r = subprocess.run([
+            "ffmpeg", "-y", "-i", str(audio_path),
+            "-ar", "16000", "-ac", "1", "-f", "wav",
+            str(wav_path),
+        ], capture_output=True)
+        if r.returncode != 0 or not wav_path.exists() or wav_path.stat().st_size < 100:
+            raise RuntimeError(
+                f"ffmpeg wav convert failed: {r.stderr.decode(errors='ignore')[:300]}"
+            )
 
         # 2) VAD 分段
         segments = segment_by_vad(
-            audio_path,
+            wav_path,
             target_min_sec=target_min_sec,
             target_max_sec=target_max_sec,
             padding_sec=padding_sec,

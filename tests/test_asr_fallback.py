@@ -48,17 +48,33 @@ def fake_audio_file(tmp_path):
     return audio
 
 
-@patch("scripts.asr_fallback.fetch_audio_192k_sync")
+@patch("scripts.asr_fallback.subprocess.run")
+@patch("scripts.asr_fallback._fetch_audio_in_subprocess")
 @patch("scripts.asr_fallback.segment_by_vad")
 @patch("scripts.asr_fallback.transcribe_wav")
 @patch("scripts.asr_fallback._slice_audio")
 def test_run_asr_full_flow(
-    mock_slice, mock_transcribe, mock_vad, mock_fetch, fake_audio_file, tmp_path
+    mock_slice, mock_transcribe, mock_vad, mock_fetch, mock_subproc, fake_audio_file, tmp_path
 ):
-    # 拉音频: 写个假文件
-    def fake_fetch(bv_id, p_num, output_path, **kwargs):
-        Path(output_path).write_bytes(b"fake mp3 " * 100)
-        return output_path
+    # subprocess.run 用于 (1) 拉音后的 ffmpeg wav 转码; (2) ASR 段切片的 _slice_audio (已 mock).
+    # 这里只让 wav 转码那一次成功, 创建同名 .wav 文件.
+    real_subproc = __import__("subprocess").run
+
+    def fake_subproc_run(cmd, *args, **kwargs):
+        # _slice_audio 已被 patch, 这里只处理 wav 转码 (cmd 含 "-f wav" 或 "-sample_fmt")
+        if isinstance(cmd, list) and len(cmd) > 2 and cmd[0] == "ffmpeg" and any(
+            x in cmd for x in ("-f", "wav", "-sample_fmt")
+        ):
+            # 这是 wav 转码: 找输出文件 (最后一个非 flag 参数)
+            out = cmd[-1]
+            Path(out).write_bytes(b"RIFF" + b"\x00" * 100)  # 假 wav 头
+            return MagicMock(returncode=0)
+        return real_subproc(cmd, *args, **kwargs)
+
+    mock_subproc.side_effect = fake_subproc_run
+    # 拉音频: 写个假 mp3 (subprocess wrapper 被 mock, 手动写文件供 wav 转码用)
+    def fake_fetch(bv_id, p_num, out_path, cookie_path):
+        Path(out_path).write_bytes(b"fake mp3 " * 100)
     mock_fetch.side_effect = fake_fetch
 
     # VAD 分段: 返回 2 段
@@ -92,15 +108,27 @@ def test_run_asr_full_flow(
     assert "BV1xx411c7mD_chunk_0.txt" in str(result["chunks"][0])
 
 
-@patch("scripts.asr_fallback.fetch_audio_192k_sync")
+@patch("scripts.asr_fallback.subprocess.run")
+@patch("scripts.asr_fallback._fetch_audio_in_subprocess")
 @patch("scripts.asr_fallback.segment_by_vad")
 @patch("scripts.asr_fallback.transcribe_wav")
 @patch("scripts.asr_fallback._slice_audio")
 def test_run_asr_no_speech_segments_returns_empty_chunk(
-    mock_slice, mock_transcribe, mock_vad, mock_fetch, tmp_path
+    mock_slice, mock_transcribe, mock_vad, mock_fetch, mock_subproc, tmp_path
 ):
-    def fake_fetch(bv_id, p_num, output_path, **kwargs):
-        Path(output_path).write_bytes(b"x" * 100)
+    real_subproc = __import__("subprocess").run
+
+    def fake_subproc_run(cmd, *args, **kwargs):
+        if isinstance(cmd, list) and len(cmd) > 2 and cmd[0] == "ffmpeg" and any(
+            x in cmd for x in ("-f", "wav", "-sample_fmt")
+        ):
+            Path(cmd[-1]).write_bytes(b"RIFF" + b"\x00" * 100)
+            return MagicMock(returncode=0)
+        return real_subproc(cmd, *args, **kwargs)
+
+    mock_subproc.side_effect = fake_subproc_run
+    def fake_fetch(bv_id, p_num, out_path, cookie_path):
+        Path(out_path).write_bytes(b"x" * 100)
     mock_fetch.side_effect = fake_fetch
     mock_vad.return_value = []  # 0 段
     mock_slice.return_value = None
@@ -114,18 +142,30 @@ def test_run_asr_no_speech_segments_returns_empty_chunk(
     assert Path(result["chunks"][0]).read_text() == ""
 
 
-@patch("scripts.asr_fallback.fetch_audio_192k_sync")
+@patch("scripts.asr_fallback.subprocess.run")
+@patch("scripts.asr_fallback._fetch_audio_in_subprocess")
 @patch("scripts.asr_fallback.segment_by_vad")
 @patch("scripts.asr_fallback.transcribe_wav")
 @patch("scripts.asr_fallback._slice_audio")
 def test_run_asr_segment_failure_does_not_break(
-    mock_slice, mock_transcribe, mock_vad, mock_fetch, tmp_path
+    mock_slice, mock_transcribe, mock_vad, mock_fetch, mock_subproc, tmp_path
 ):
     """单段 ASR 失败应不阻断其他段"""
     from scripts.mimo_audio import MiMoASRError
     from scripts.vad_segmenter import Segment
-    def fake_fetch(bv_id, p_num, output_path, **kwargs):
-        Path(output_path).write_bytes(b"x" * 100)
+    real_subproc = __import__("subprocess").run
+
+    def fake_subproc_run(cmd, *args, **kwargs):
+        if isinstance(cmd, list) and len(cmd) > 2 and cmd[0] == "ffmpeg" and any(
+            x in cmd for x in ("-f", "wav", "-sample_fmt")
+        ):
+            Path(cmd[-1]).write_bytes(b"RIFF" + b"\x00" * 100)
+            return MagicMock(returncode=0)
+        return real_subproc(cmd, *args, **kwargs)
+
+    mock_subproc.side_effect = fake_subproc_run
+    def fake_fetch(bv_id, p_num, out_path, cookie_path):
+        Path(out_path).write_bytes(b"x" * 100)
     mock_fetch.side_effect = fake_fetch
     mock_vad.return_value = [Segment(0.0, 30.0), Segment(30.0, 60.0)]
     mock_slice.return_value = None

@@ -9,7 +9,7 @@ MiMo-V2.5-ASR 客户端封装。
 import os
 import base64
 from pathlib import Path
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 
 DEFAULT_BASE_URL = "https://api.xiaomimimo.com/v1"
 DEFAULT_MODEL = "mimo-v2.5-asr"
@@ -55,18 +55,21 @@ def transcribe_wav(
     data_url = f"data:{mime};base64,{b64}"
 
     c = _client(api_key)
-    resp = c.chat.completions.create(
-        model=DEFAULT_MODEL,
-        messages=[{
-            "role": "user",
-            "content": [{
-                "type": "input_audio",
-                "input_audio": {"data": data_url},
+    try:
+        resp = c.chat.completions.create(
+            model=DEFAULT_MODEL,
+            messages=[{
+                "role": "user",
+                "content": [{
+                    "type": "input_audio",
+                    "input_audio": {"data": data_url},
+                }],
             }],
-        }],
-        extra_body={"asr_options": {"language": language}},
-        timeout=timeout,
-    )
+            extra_body={"asr_options": {"language": language}},
+            timeout=timeout,
+        )
+    except OpenAIError as e:
+        raise MiMoASRError(f"ASR API error: {e}") from e
     if not resp.choices:
         raise MiMoASRError("empty choices in response")
     return resp.choices[0].message.content or ""

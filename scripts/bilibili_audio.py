@@ -48,7 +48,7 @@ async def fetch_audio_192k(
     page_index: int,
     output_path: str | Path,
     *,
-    cookie_path: str = "~/.openclaw/workspace/bilibili_cookie.txt",
+    cookie_path: str = str(Path(__file__).resolve().parent.parent / "secrets" / "bilibili_cookie.txt"),
 ) -> Path:
     """拉指定分 P 的 192kbps 音轨到 output_path (mp3)。返回 output_path。async 版本。"""
     output = Path(output_path)
@@ -89,7 +89,7 @@ def fetch_audio_192k_sync(
     page_index: int,
     output_path: str | Path,
     *,
-    cookie_path: str = "~/.openclaw/workspace/bilibili_cookie.txt",
+    cookie_path: str = str(Path(__file__).resolve().parent.parent / "secrets" / "bilibili_cookie.txt"),
 ) -> Path:
     """sync wrapper around fetch_audio_192k."""
     return asyncio.run(fetch_audio_192k(bv_id, page_index, output_path, cookie_path=cookie_path))

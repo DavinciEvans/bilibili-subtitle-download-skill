@@ -3,6 +3,7 @@ import sys
 import json
 import re
 import asyncio
+from pathlib import Path
 import requests
 from bilibili_api import login_v2, Credential
 
@@ -18,9 +19,14 @@ except ImportError:
     from scripts.asr_fallback import run_asr
 
 # Configuration
-COOKIE_FILE = os.path.expanduser('~/.openclaw/workspace/bilibili_cookie.txt')
+# 所有凭证/中间产物路径都相对于 skill 安装根目录 (<skill_root>):
+#   COOKIE_FILE     = <skill_root>/secrets/bilibili_cookie.txt
+#   QR_IMAGE_PATH   = <skill_root>/secrets/bilibili_login_qr.png
+SKILL_ROOT = Path(__file__).resolve().parent.parent
+SECRETS_DIR = SKILL_ROOT / "secrets"
+COOKIE_FILE = str(SECRETS_DIR / "bilibili_cookie.txt")
+QR_IMAGE_PATH = str(SECRETS_DIR / "bilibili_login_qr.png")
 CHARS_PER_CHUNK = 100000
-QR_IMAGE_PATH = os.path.expanduser('~/.openclaw/workspace/bilibili_login_qr.png')
 OUTPUT_DIR_FALLBACK = os.path.join('bili_temp', '{bv_id}')  # 占位符, main() 替换
 
 def clean_filename(title):

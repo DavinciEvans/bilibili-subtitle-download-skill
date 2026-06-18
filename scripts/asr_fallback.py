@@ -16,6 +16,10 @@ from scripts.text_dedup import merge_with_overlap_dedup
 
 CHARS_PER_CHUNK = 100_000
 
+# 默认 cookie 路径: <skill_root>/secrets/bilibili_cookie.txt
+SKILL_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_COOKIE_FILE = SKILL_ROOT / "secrets" / "bilibili_cookie.txt"
+
 def _fetch_audio_in_subprocess(bv_id: str, p_num: int, out_path: Path, cookie_path: str) -> None:
     """在干净子进程里跑 fetch_audio_192k, 避免嵌套 event loop."""
     # 把项目根加到 sys.path, 让子进程能 import scripts.bilibili_audio
@@ -55,7 +59,7 @@ def run_asr(
     p_num: int,
     output_dir: str | Path,
     *,
-    cookie_path: str = "~/.openclaw/workspace/bilibili_cookie.txt",
+    cookie_path: str = str(DEFAULT_COOKIE_FILE),
     api_key: str | None = None,
     language: str = "zh",
     target_min_sec: float = 60.0,

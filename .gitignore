@@ -4,3 +4,4 @@ __pycache__/
 tests/fixtures/*.wav
 !tests/fixtures/silence_30s.wav
 bili_temp/
+secrets/

@@ -2,7 +2,7 @@
 Pytest fixtures shared across tests.
 
 `monkeypatch_key_file` redirects `scripts.mimo_audio.DEFAULT_KEY_FILE` to a
-tmp file in the test sandbox, so the real `~/.openclaw/workspace/mimo_api_key`
+tmp file in the test sandbox, so the real `<skill_root>/secrets/mimo_api_key`
 is never read during tests. By default the tmp file is empty; individual tests
 can write content to `tmp_key_file` (the fixture's return value) to simulate
 "key file exists with this content".

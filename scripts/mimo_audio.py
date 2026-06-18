@@ -9,7 +9,7 @@ MiMo-V2.5-ASR 客户端封装。
 API key 解析优先级（从高到低）:
 1. 函数参数 `api_key`
 2. 环境变量 `MIMO_API_KEY`
-3. key 文件 `~/.openclaw/workspace/mimo_api_key` (首行, 自动 strip)
+3. key 文件 `<skill_root>/secrets/mimo_api_key` (首行, 自动 strip)
 """
 import os
 import base64
@@ -19,7 +19,8 @@ from openai import OpenAI, OpenAIError
 DEFAULT_BASE_URL = "https://api.xiaomimimo.com/v1"
 DEFAULT_MODEL = "mimo-v2.5-asr"
 MAX_BASE64_MB = 10  # 文档硬限制
-DEFAULT_KEY_FILE = Path.home() / ".openclaw" / "workspace" / "mimo_api_key"
+# 默认 key 文件: <skill_root>/secrets/mimo_api_key. scripts/mimo_audio.py → ../../secrets/mimo_api_key
+DEFAULT_KEY_FILE = Path(__file__).resolve().parent.parent / "secrets" / "mimo_api_key"
 
 class MiMoASRError(Exception):
     pass

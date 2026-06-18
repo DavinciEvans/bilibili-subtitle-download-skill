@@ -29,7 +29,7 @@ pip install bilibili-api-python
     cd "$SKILL_DIR"  # 例如 ~/.hermes/skills/media/bilibili-subtitle-downloader
     PYTHONIOENCODING=utf-8 python scripts/download_and_chunk.py <BV_ID>
     ```
-    * **登录检查**: 如果脚本输出 `QR_CODE_READY:<PATH>`，需要扫码登录。Cookie 保存到 `~/.openclaw/workspace/bilibili_cookie.txt`
+    * **登录检查**: 如果脚本输出 `QR_CODE_READY:<PATH>`，需要扫码登录。Cookie 保存到 `<skill_root>/secrets/bilibili_cookie.txt`
     * **字幕检测**: 脚本优先获取用户字幕（`zh`），若无则获取 AI 字幕（`ai-zh`）
 
 2.  **处理输出**: 解析脚本输出的 `RESULT_JSON`，分块文件命名格式：
@@ -59,14 +59,14 @@ pip install bilibili-api-python
 5. 输出**纯识别文本** chunk 文件（无时间戳，段间换行）
 
 ### 前置条件
-- 已登录（cookie 文件 `~/.openclaw/workspace/bilibili_cookie.txt` 存在）
+- 已登录（cookie 文件 `<skill_root>/secrets/bilibili_cookie.txt` 存在）
 
 ### 配置
 - **API key 解析优先级**（从高到低）：
   1. `transcribe_wav(api_key=...)` 函数参数
   2. 环境变量 `MIMO_API_KEY`
-  3. key 文件 `~/.openclaw/workspace/mimo_api_key`（首行非空内容，自动 strip）
-- cookie 文件：复用 `~/.openclaw/workspace/bilibili_cookie.txt`
+  3. key 文件 `<skill_root>/secrets/mimo_api_key`（首行非空内容，自动 strip）
+- cookie 文件：`<skill_root>/secrets/bilibili_cookie.txt`
 - 输出文件名前缀 `<BV_ID>_chunk_N.txt`，内容为各段去重后的纯识别文本，段间用换行分隔（**无时间戳**）
 
 ### RESULT_JSON method 字段

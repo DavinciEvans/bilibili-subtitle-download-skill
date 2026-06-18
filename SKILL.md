@@ -24,10 +24,10 @@ pip install bilibili-api-python
 
 ## 工作流程
 
-1.  **提取字幕**: 运行脚本来下载并分块字幕。普通视频均为 BV 号开头
+1.  **提取字幕**: 运行脚本来下载并分块字幕。普通视频均为 BV 号开头。脚本路径以 skill 安装根目录为基准，下方命令以 `SKILL_DIR` 表示该目录。
     ```bash
-    cd ~  # 建议在 home 目录运行，避免路径问题
-    PYTHONIOENCODING=utf-8 python ~/.hermes/skills/media/bilibili-subtitle-downloader/scripts/download_and_chunk.py <BV_ID>
+    cd "$SKILL_DIR"  # 例如 ~/.hermes/skills/media/bilibili-subtitle-downloader
+    PYTHONIOENCODING=utf-8 python scripts/download_and_chunk.py <BV_ID>
     ```
     * **登录检查**: 如果脚本输出 `QR_CODE_READY:<PATH>`，需要扫码登录。Cookie 保存到 `~/.openclaw/workspace/bilibili_cookie.txt`
     * **字幕检测**: 脚本优先获取用户字幕（`zh`），若无则获取 AI 字幕（`ai-zh`）
@@ -40,8 +40,8 @@ pip install bilibili-api-python
 
 1.  **提取课程/剧集信息**: 使用课程专属脚本
     ```bash
-    cd ~
-    PYTHONIOENCODING=utf-8 python ~/.hermes/skills/media/bilibili-subtitle-downloader/scripts/cheese_downloader.py <SS_ID or EP_ID>
+    cd "$SKILL_DIR"
+    PYTHONIOENCODING=utf-8 python scripts/cheese_downloader.py <SS_ID or EP_ID>
     ```
     * **登录**: 脚本将生成 `bilibili_login_qr.png` 二维码
     * **SS_ID 模式**: 打印课程信息和剧集列表，需用 EP_ID 获取字幕

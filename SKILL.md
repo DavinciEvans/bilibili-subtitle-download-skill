@@ -24,12 +24,21 @@ pip install bilibili-api-python
 
 ## 工作流程
 
-1.  **提取字幕**: 运行脚本来下载并分块字幕。普通视频均为 BV 号开头。脚本路径以 skill 安装根目录为基准，下方命令以 `SKILL_DIR` 表示该目录。
+> **路径解析**：本 skill 的所有脚本、cookie、key、二维码临时图都位于同一个目录树下——skill 的**安装根目录**（即 `SKILL.md` 所在的目录）。**你（LLM）执行命令前请先确定这个根目录的绝对路径**，把它设成 `SKILL_DIR` 环境变量再 `cd` 进去——例如 `SKILL_DIR=/home/hfun/.hermes/skills/media/bilibili-subtitle-downloader`（路径以实际安装位置为准）。
+>
+> 一种自解析方式：把下方命令保存为脚本文件并 `bash` 执行时，`$0` 会指向脚本自身，进而推出 skill 根：
+> ```bash
+> SKILL_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+> ```
+> 或者更简单：你直接根据当前会话上下文知道 skill 安装在哪，把绝对路径写进 `SKILL_DIR` 即可。
+
+1.  **提取字幕**: 运行脚本来下载并分块字幕。普通视频均为 BV 号开头
     ```bash
-    cd "$SKILL_DIR"  # 例如 ~/.hermes/skills/media/bilibili-subtitle-downloader
+    SKILL_DIR=<绝对路径，到 SKILL.md 所在目录>   # 例如 /home/hfun/.hermes/skills/media/bilibili-subtitle-downloader
+    cd "$SKILL_DIR"
     PYTHONIOENCODING=utf-8 python scripts/download_and_chunk.py <BV_ID>
     ```
-    * **登录检查**: 如果脚本输出 `QR_CODE_READY:<PATH>`，需要扫码登录。Cookie 保存到 `<skill_root>/secrets/bilibili_cookie.txt`
+    * **登录检查**: 如果脚本输出 `QR_CODE_READY:<PATH>`，需要扫码登录。Cookie 保存到 `$SKILL_DIR/secrets/bilibili_cookie.txt`
     * **字幕检测**: 脚本优先获取用户字幕（`zh`），若无则获取 AI 字幕（`ai-zh`）
 
 2.  **处理输出**: 解析脚本输出的 `RESULT_JSON`，分块文件命名格式：
@@ -40,6 +49,7 @@ pip install bilibili-api-python
 
 1.  **提取课程/剧集信息**: 使用课程专属脚本
     ```bash
+    SKILL_DIR=<绝对路径，到 SKILL.md 所在目录>
     cd "$SKILL_DIR"
     PYTHONIOENCODING=utf-8 python scripts/cheese_downloader.py <SS_ID or EP_ID>
     ```
@@ -59,14 +69,14 @@ pip install bilibili-api-python
 5. 输出**纯识别文本** chunk 文件（无时间戳，段间换行）
 
 ### 前置条件
-- 已登录（cookie 文件 `<skill_root>/secrets/bilibili_cookie.txt` 存在）
+- 已登录（cookie 文件 `$SKILL_DIR/secrets/bilibili_cookie.txt` 存在）
 
 ### 配置
 - **API key 解析优先级**（从高到低）：
   1. `transcribe_wav(api_key=...)` 函数参数
   2. 环境变量 `MIMO_API_KEY`
-  3. key 文件 `<skill_root>/secrets/mimo_api_key`（首行非空内容，自动 strip）
-- cookie 文件：`<skill_root>/secrets/bilibili_cookie.txt`
+  3. key 文件 `$SKILL_DIR/secrets/mimo_api_key`（首行非空内容，自动 strip）
+- cookie 文件：`$SKILL_DIR/secrets/bilibili_cookie.txt`
 - 输出文件名前缀 `<BV_ID>_chunk_N.txt`，内容为各段去重后的纯识别文本，段间用换行分隔（**无时间戳**）
 
 ### RESULT_JSON method 字段

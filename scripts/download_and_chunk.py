@@ -69,6 +69,26 @@ async def login_with_qr():
         
     return cookie_str
 
+def check_login(cookie):
+    """
+    验证 cookie 是否真正有效 (登录态).
+    用 /x/web-interface/nav 接口: code==0 + isLogin==True 才算登录.
+    仅检查 cookie 字符串是否存在不能判断登录态 (SESSDATA 看似未过期也可能被风控).
+    """
+    url = "https://api.bilibili.com/x/web-interface/nav"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+        'Referer': 'https://www.bilibili.com/',
+        'Cookie': cookie
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        data = resp.json()
+        return data.get('code') == 0 and data.get('data', {}).get('isLogin') is True
+    except Exception:
+        return False
+
+
 def get_video_info(bv_id, cookie):
     url = "https://api.bilibili.com/x/web-interface/view"
     params = {'bvid': bv_id}
@@ -171,12 +191,24 @@ async def main(argv=None):
     try:
         cookie = get_saved_cookie()
         info = None
+        cookie_is_fresh = False
 
         if cookie:
+            # 校验 cookie 是否真正有效: 通过 /nav 接口 (code==0 才是登录态)
             info, err = get_video_info(bv_id, cookie)
+            nav_check = check_login(cookie)
+            if nav_check:
+                cookie_is_fresh = True
+            else:
+                print("[*] Cookie 文件存在但已失效, 重新扫码登录...🐾", flush=True)
+                # 删除失效 cookie, 强制重新登录
+                try:
+                    os.remove(COOKIE_FILE)
+                except OSError:
+                    pass
 
-        # If no cookie or cookie expired/invalid
-        if not info:
+        # If no cookie / no fresh cookie / no video info → QR login
+        if not cookie or not cookie_is_fresh or not info:
             cookie = await login_with_qr()
             info, err = get_video_info(bv_id, cookie)
             if not info:

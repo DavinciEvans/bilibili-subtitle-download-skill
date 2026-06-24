@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.pyo
+tests/fixtures/*.wav
+!tests/fixtures/silence_30s.wav
+bili_temp/
+secrets/

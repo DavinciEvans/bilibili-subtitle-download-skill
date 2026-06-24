@@ -3,13 +3,31 @@ import sys
 import json
 import re
 import asyncio
+from pathlib import Path
 import requests
 from bilibili_api import login_v2, Credential
 
+try:
+    from scripts.asr_fallback import run_asr
+except ImportError:
+    # 当 download_and_chunk.py 被作为 __main__ 直接运行（非 -m scripts.download_and_chunk）时,
+    # scripts 包的相对 import 会失败。fallback: 把 scripts/ 父目录加到 sys.path,
+    # 这样 scripts 就成了 namespace package, scripts.asr_fallback 等子模块都可正常 import
+    import sys as _sys
+    from pathlib import Path as _Path
+    _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+    from scripts.asr_fallback import run_asr
+
 # Configuration
-COOKIE_FILE = os.path.expanduser('~/.openclaw/workspace/bilibili_cookie.txt')
-CHARS_PER_CHUNK = 100000 
-QR_IMAGE_PATH = os.path.expanduser('~/.openclaw/workspace/bilibili_login_qr.png')
+# 所有凭证/中间产物路径都相对于 skill 安装根目录 (<skill_root>):
+#   COOKIE_FILE     = <skill_root>/secrets/bilibili_cookie.txt
+#   QR_IMAGE_PATH   = <skill_root>/secrets/bilibili_login_qr.png
+SKILL_ROOT = Path(__file__).resolve().parent.parent
+SECRETS_DIR = SKILL_ROOT / "secrets"
+COOKIE_FILE = str(SECRETS_DIR / "bilibili_cookie.txt")
+QR_IMAGE_PATH = str(SECRETS_DIR / "bilibili_login_qr.png")
+CHARS_PER_CHUNK = 100000
+OUTPUT_DIR_FALLBACK = os.path.join('bili_temp', '{bv_id}')  # 占位符, main() 替换
 
 def clean_filename(title):
     return re.sub(r'[\\/:*?"<>|]', '_', title)
@@ -27,7 +45,7 @@ async def login_with_qr():
     # Save QR code image for user to scan
     pic = qr.get_qrcode_picture()
     pic.to_file(QR_IMAGE_PATH)
-    
+
     print(f"QR_CODE_READY:{QR_IMAGE_PATH}", flush=True)
     print("老大，请扫描这个二维码登录喵！🐾", flush=True)
     
@@ -51,6 +69,26 @@ async def login_with_qr():
         
     return cookie_str
 
+def check_login(cookie):
+    """
+    验证 cookie 是否真正有效 (登录态).
+    用 /x/web-interface/nav 接口: code==0 + isLogin==True 才算登录.
+    仅检查 cookie 字符串是否存在不能判断登录态 (SESSDATA 看似未过期也可能被风控).
+    """
+    url = "https://api.bilibili.com/x/web-interface/nav"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+        'Referer': 'https://www.bilibili.com/',
+        'Cookie': cookie
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        data = resp.json()
+        return data.get('code') == 0 and data.get('data', {}).get('isLogin') is True
+    except Exception:
+        return False
+
+
 def get_video_info(bv_id, cookie):
     url = "https://api.bilibili.com/x/web-interface/view"
     params = {'bvid': bv_id}
@@ -67,8 +105,13 @@ def get_video_info(bv_id, cookie):
     return data['data'], None
 
 def fetch_subtitle_content(bv_id, cid, cookie):
-    # Logic adapted from gpt-bilibili-to-notion
-    subtitle_api = 'https://api.bilibili.com/x/player/v2'
+    """
+    Fetch subtitles from Bilibili API. Supports both user-uploaded and AI-generated subtitles.
+    - User subtitles: lan='zh' (Chinese)
+    - AI subtitles: lan='ai-zh' (AI-generated Chinese)
+    Both have signed URLs with auth_key that can be directly accessed.
+    """
+    subtitle_api = 'https://api.bilibili.com/x/player/wbi/v2'
     headers = {
         'authority': 'api.bilibili.com',
         'accept': 'application/json, text/plain, */*',
@@ -80,55 +123,92 @@ def fetch_subtitle_content(bv_id, cid, cookie):
     params = {'bvid': bv_id, 'cid': cid}
     resp = requests.get(subtitle_api, headers=headers, params=params)
     data = resp.json()
-    
+
     if data.get('code') != 0:
-        return None
-    
+        return None, None
+
     subtitles = data.get('data', {}).get('subtitle', {}).get('subtitles', [])
     if not subtitles:
-        return None
+        return None, None
 
-    # Prefer Chinese (zh-Hans or zh-CN)
-    target_url = ""
+    # Priority: user Chinese (zh) > AI Chinese (ai-zh) > any first
+    target_url = None
+    subtitle_type = None  # 'user' or 'ai'
+
+    # First pass: prefer user Chinese subtitle
     for s in subtitles:
-        if 'zh' in s.get('lan', ''):
-            target_url = s['subtitle_url']
+        lan = s.get('lan', '')
+        if lan == 'zh':
+            target_url = s.get('subtitle_url')
+            subtitle_type = 'user'
             break
-    
-    # If no Chinese subtitle found, but subtitles list is not empty
+
+    # Second pass: fallback to AI Chinese subtitle
+    if not target_url:
+        for s in subtitles:
+            lan = s.get('lan', '')
+            if lan == 'ai-zh':
+                target_url = s.get('subtitle_url')
+                subtitle_type = 'ai'
+                break
+
+    # Third pass: any available subtitle
     if not target_url and subtitles:
-        target_url = subtitles[0].get('subtitle_url', "")
+        target_url = subtitles[0].get('subtitle_url')
+        subtitle_type = 'user'
 
     if not target_url:
-        return None
+        return None, None
 
     if target_url.startswith('//'):
         target_url = 'https:' + target_url
-    
-    resp = requests.get(target_url)
+
+    resp = requests.get(target_url, timeout=30)
     body = resp.json().get('body', [])
     full_text = "\n".join([b.get('content', '') for b in body])
-    return full_text
+    return full_text, subtitle_type
 
-async def main():
-    if len(sys.argv) < 2:
+
+def fetch_ai_subtitle(bv_id, cid, cookie):
+    """
+    This function is kept for backward compatibility.
+    AI subtitles are now fetched directly in fetch_subtitle_content().
+    """
+    return None  # Not needed anymore
+
+async def main(argv=None):
+    if argv is None:
+        argv = sys.argv
+    if len(argv) < 2:
         print("Usage: python3 download_and_chunk.py <BV_ID> [P_NUM]")
         sys.exit(1)
-    
-    bv_id = sys.argv[1]
-    p_num = int(sys.argv[2]) if len(sys.argv) > 2 else 0
-    
+
+    bv_id = argv[1]
+    p_num = int(argv[2]) if len(argv) > 2 else 0
+
     print(f"[*] Processing {bv_id} (P{p_num})...🐾", flush=True)
-    
+
     try:
         cookie = get_saved_cookie()
         info = None
-        
+        cookie_is_fresh = False
+
         if cookie:
+            # 校验 cookie 是否真正有效: 通过 /nav 接口 (code==0 才是登录态)
             info, err = get_video_info(bv_id, cookie)
-        
-        # If no cookie or cookie expired/invalid
-        if not info:
+            nav_check = check_login(cookie)
+            if nav_check:
+                cookie_is_fresh = True
+            else:
+                print("[*] Cookie 文件存在但已失效, 重新扫码登录...🐾", flush=True)
+                # 删除失效 cookie, 强制重新登录
+                try:
+                    os.remove(COOKIE_FILE)
+                except OSError:
+                    pass
+
+        # If no cookie / no fresh cookie / no video info → QR login
+        if not cookie or not cookie_is_fresh or not info:
             cookie = await login_with_qr()
             info, err = get_video_info(bv_id, cookie)
             if not info:
@@ -139,19 +219,43 @@ async def main():
         if p_num >= len(pages):
             raise Exception(f"Invalid P_NUM: video only has {len(pages)} parts.")
         cid = pages[p_num]['cid']
-        
-        # Try fetching subtitle using the logic from gpt-bilibili-to-notion
-        full_text = fetch_subtitle_content(bv_id, cid, cookie)
-        
+
+        # Try fetching subtitle (supports both user and AI subtitles)
+        full_text, subtitle_type = fetch_subtitle_content(bv_id, cid, cookie)
+
         if not full_text:
-            print("ERROR: 没找到字幕喵...😿 请确认视频是否有 CC 字幕喵。")
-            sys.exit(1)
+            # 优先检查 cookie (ASR 需要)
+            if not cookie:
+                print("ERROR: 没找到字幕喵, 且无 cookie 文件, 无法走 ASR fallback...😿")
+                print(f"       请先登录以生成 cookie: {COOKIE_FILE}")
+                sys.exit(1)
+
+            print("[*] 没找到用户/AI字幕, 尝试 ASR fallback 🐾", flush=True)
+            output_dir = os.path.join(os.getcwd(), OUTPUT_DIR_FALLBACK.format(bv_id=bv_id))
+            try:
+                asr_result = run_asr(bv_id, p_num, output_dir, cookie_path=COOKIE_FILE)
+            except Exception as e:
+                print(f"ERROR: ASR fallback 失败: {e}")
+                sys.exit(1)
+
+            print(f"[*] ASR 完成, 分 {asr_result['segments_count']} 段, 写 {len(asr_result['chunks'])} 个 chunk")
+            print("RESULT_JSON:" + json.dumps({
+                "bv_id": bv_id,
+                "title": info.get('title', bv_id),
+                "total_chars": asr_result["total_chars"],
+                "chunks": asr_result["chunks"],
+                "method": "asr_fallback",
+            }))
+            return
+
+        if subtitle_type == 'ai':
+            print("[*] 检测到AI字幕并获取成功！🐾", flush=True)
 
         title = info.get('title', bv_id)
         total_chars = len(full_text)
-        
+
         # Create output dir in workspace using BV_ID
-        output_dir = os.path.join(os.getcwd(), 'bili_temp', bv_id)
+        output_dir = os.path.join(os.getcwd(), OUTPUT_DIR_FALLBACK.format(bv_id=bv_id))
         os.makedirs(output_dir, exist_ok=True)
         
         chunks = []
